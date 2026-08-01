@@ -212,6 +212,17 @@ def apply_context_exceptions(
 
     notes: list[str] = []
     meta = rules.metadata
+    is_spam = bool(meta.get("content_is_spam"))
+    is_promotional = bool(meta.get("content_is_promotional"))
+    is_transactional = bool(meta.get("content_is_transactional"))
+    is_verified_business = bool(meta.get("business_is_verified"))
+    relationship_category = str(meta.get("relationship_category", "Unknown"))
+    relationship_confidence = float(meta.get("relationship_confidence", 0.0) or 0.0)
+    sender_reply_rate = float(meta.get("sender_reply_rate", 0.0) or 0.0)
+    sender_open_rate = float(meta.get("sender_open_rate", 0.0) or 0.0)
+    sender_dismissal_rate = float(meta.get("sender_dismissal_rate", 0.0) or 0.0)
+    has_scam_signal = any(rule.family is RuleFamily.SCAM for rule in rules.triggered_rules)
+    suppress_soft_relaxation = has_scam_signal or is_spam
 
     quiet_hours_active = bool(meta.get("user_dnd_active")) or any(
         rule.rule_id == "sys_quiet_hours" for rule in rules.triggered_rules
@@ -224,19 +235,46 @@ def apply_context_exceptions(
         band = Action.DIGEST
         notes.append("Quiet hours in effect: notify capped to digest.")
 
-    if band is Action.MUTE and bool(meta.get("sender_is_group_admin")):
+    if (
+        band is Action.NOTIFY
+        and _has_rule(rules, "emergency_otp")
+        and (is_spam or is_promotional)
+        and not is_verified_business
+    ):
+        band = Action.DIGEST
+        notes.append("Suspicious OTP-style content: notify relaxed to digest.")
+
+    if band is Action.MUTE and bool(meta.get("sender_is_group_admin")) and not suppress_soft_relaxation:
         band = Action.DIGEST
         notes.append("Sender is a trusted group admin: mute relaxed to digest.")
 
-    is_verified_business = bool(meta.get("business_is_verified"))
-    is_transactional = bool(meta.get("content_is_transactional"))
-    if band is Action.MUTE and is_verified_business and is_transactional:
+    if (
+        band is Action.MUTE
+        and is_verified_business
+        and is_transactional
+        and not suppress_soft_relaxation
+    ):
         band = Action.DIGEST
         notes.append("Verified business transactional update: mute relaxed to digest.")
 
-    if band is Action.MUTE and bool(meta.get("mentions_user")):
+    if band is Action.MUTE and bool(meta.get("mentions_user")) and not suppress_soft_relaxation:
         band = Action.DIGEST
         notes.append("User is directly mentioned: mute relaxed to digest.")
+
+    trusted_relationship = relationship_category in {"Family", "Close Friend"}
+    active_two_way_history = (
+        sender_reply_rate >= 0.25 and sender_open_rate >= 0.35 and sender_dismissal_rate <= 0.45
+    )
+    if (
+        band is Action.MUTE
+        and trusted_relationship
+        and relationship_confidence >= 0.60
+        and active_two_way_history
+        and not is_spam
+        and not is_promotional
+    ):
+        band = Action.DIGEST
+        notes.append("Trusted personal contact with active history: mute relaxed to digest.")
 
     return band, tuple(notes)
 
