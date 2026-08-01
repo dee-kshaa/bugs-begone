@@ -1,0 +1,42 @@
+23:36:16 | INFO     | __main__                     | Loading datasets...
+23:36:16 | INFO     | src.io.loaders               | Loading datasets from /tmp/bugs-begone-e2e/raw (strict=False)
+23:36:16 | INFO     | src.io.loaders               | Loaded users.csv                rows=1        cols=1
+23:36:16 | INFO     | src.io.loaders               | Loaded groups.csv               rows=1        cols=1
+23:36:16 | INFO     | src.io.loaders               | Loaded group_members.csv        rows=1        cols=2
+23:36:16 | INFO     | src.io.loaders               | Loaded business_accounts.csv    rows=1        cols=1
+23:36:16 | INFO     | src.io.loaders               | Loaded user_business_history.csv rows=1        cols=3
+23:36:16 | INFO     | src.io.loaders               | Loaded messages.csv             rows=1        cols=7
+23:36:16 | INFO     | src.io.loaders               | Loaded message_history.csv      rows=1        cols=5
+23:36:16 | INFO     | src.io.loaders               | Loaded message_events.csv       rows=1        cols=1
+23:36:16 | INFO     | src.io.loaders               | Loaded images.csv               rows=0        cols=3
+23:36:16 | INFO     | src.io.loaders               | Loaded voice_notes.csv          rows=0        cols=3
+23:36:16 | INFO     | src.io.loaders               | Dataset summary (source=/tmp/bugs-begone-e2e/raw):
+23:36:16 | INFO     | src.io.loaders               |   [ok ] users                  rows=1        cols=1    user_id
+23:36:16 | INFO     | src.io.loaders               |   [ok ] groups                 rows=1        cols=1    group_id
+23:36:16 | INFO     | src.io.loaders               |   [ok ] group_members          rows=1        cols=2    group_id, user_id
+23:36:16 | INFO     | src.io.loaders               |   [ok ] business_accounts      rows=1        cols=1    business_id
+23:36:16 | INFO     | src.io.loaders               |   [ok ] user_business_history  rows=1        cols=3    user_id, business_id, timestamp
+23:36:16 | INFO     | src.io.loaders               |   [ok ] messages               rows=1        cols=7    message_id, sender_id, recipient_user_id, conversation_id, timestamp, message_text, media_type
+23:36:16 | INFO     | src.io.loaders               |   [ok ] message_history        rows=1        cols=5    message_id, sender_id, conversation_id, timestamp, message_text
+23:36:16 | INFO     | src.io.loaders               |   [ok ] message_events         rows=1        cols=1    message_id
+23:36:16 | INFO     | src.io.loaders               |   [ok ] images                 rows=0        cols=3    image_id, message_id, media_path
+23:36:16 | INFO     | src.io.loaders               |   [ok ] voice_notes            rows=0        cols=3    voice_note_id, message_id, media_path
+23:36:16 | INFO     | __main__                     | Building router...
+23:36:16 | INFO     | src.retrieval.context        | ContextRetriever: combined message frame has 2 row(s).
+23:36:16 | INFO     | src.features.temporal        | Built timestamp index over 'sender_id' with 2 key(s).
+23:36:16 | INFO     | src.features.temporal        | Built timestamp index over 'conversation_id' with 1 key(s).
+23:36:16 | INFO     | src.features.group           | Built 1 group profile(s).
+23:36:16 | INFO     | src.features.business        | Built 1 business profile(s).
+23:36:16 | INFO     | src.media.cache              | MediaCache: no existing cache at /home/runner/work/bugs-begone/bugs-begone/hackerrank/data/cache/ocr.parquet (starting empty).
+23:36:16 | INFO     | src.media.cache              | MediaCache: no existing cache at /home/runner/work/bugs-begone/bugs-begone/hackerrank/data/cache/asr.parquet (starting empty).
+23:36:16 | INFO     | src.pipeline.enrich          | MessageEnricher initialised. {'combined_messages': 2, 'group_profiles': 1, 'business_profiles': 1, 'sender_index_keys': 2, 'conversation_index_keys': 1}
+23:36:16 | INFO     | src.pipeline.route           | Router initialised (relationship_resolver=none (group-hint fallback)).
+23:36:16 | INFO     | __main__                     | Routing messages...
+23:36:16 | INFO     | src.decision.arbiter         | Arbiter: message_id=m1 action=mute type=personal confidence=0.50 score=0.0 threshold_band=mute overrides_applied=0 exceptions=0
+23:36:16 | INFO     | __main__                     | iter_messages: yielded 1 message(s), skipped 0 invalid row(s).
+23:36:16 | INFO     | src.pipeline.route           | Router.route complete: 1 processed, 0 failed (100.0% success).
+23:36:16 | INFO     | src.media.cache              | MediaCache[ocr.parquet]: closed. hits=0 misses=0 entries=0
+23:36:16 | INFO     | src.media.cache              | MediaCache[asr.parquet]: closed. hits=0 misses=0 entries=0
+23:36:16 | INFO     | __main__                     | Writing /home/runner/work/bugs-begone/bugs-begone/hackerrank/outputs/output.csv...
+23:36:16 | INFO     | src.io.writers               | write_output_csv: wrote 1 row(s) to /home/runner/work/bugs-begone/bugs-begone/hackerrank/outputs/output.csv.
+23:36:16 | INFO     | __main__                     | Done: 1 row(s) written to /home/runner/work/bugs-begone/bugs-begone/hackerrank/outputs/output.csv in 0.0s (processed=1, failed=0, success_rate=100.0%).
