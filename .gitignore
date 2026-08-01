@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Logs
+outputs/logs/
+
+# Data (don't upload competition dataset)
+data/raw/
+data/cache/
+*.parquet
+
+# Optional
+node_modules/
