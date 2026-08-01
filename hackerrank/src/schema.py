@@ -23,7 +23,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, time
 from enum import Enum
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable
 
 from src.config import MAX_EVIDENCE_IDS
 

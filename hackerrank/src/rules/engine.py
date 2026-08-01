@@ -59,7 +59,6 @@ from src.schema import (
     OverrideRecord,
     RelationshipCategory,
     RelationshipResult,
-    UserProfile,
 )
 
 logger = logging.getLogger(__name__)

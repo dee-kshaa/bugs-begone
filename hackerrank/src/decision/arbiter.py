@@ -37,7 +37,7 @@ from typing import Callable
 
 from src.config import AppConfig, get_config
 from src.decision.confidence import CalibratedConfidence, ConfidenceCalibrator
-from src.decision.evidence import EvidenceSelection, select_evidence
+from src.decision.evidence import select_evidence
 from src.media.asr import AsrResult
 from src.media.ocr import OcrResult
 from src.retrieval.context import MessageContext
@@ -49,7 +49,6 @@ from src.schema import (
     Message,
     OverrideEffect,
     OverrideRecord,
-    RelationshipCategory,
     ScoreTrace,
 )
 from src.scoring.priority import PriorityAssessment

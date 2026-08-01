@@ -26,7 +26,6 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
-from src.config import RetrievalConfig, get_config
 from src.features.content import FORWARD_PATTERN
 from src.features.relationship import tokenise
 from src.schema import RetrievalCandidate

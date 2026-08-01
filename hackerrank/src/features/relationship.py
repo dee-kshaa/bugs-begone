@@ -1,9 +1,8 @@
 """
 Relationship signal extraction.
 
-This module produces the *signals* the relationship engine fuses; it does not
-itself decide a category. ``src/relationship/classifier.py`` consumes what is
-produced here and emits a :class:`~src.schema.RelationshipResult`.
+This module produces the *signals* a relationship-fusion stage can consume; it
+does not itself decide a category.
 
 Three signal families live here:
 
@@ -20,7 +19,7 @@ touches the network or the LLM.
 Dependencies
 ------------
 ``pandas``, ``src.config``, ``src.schema``. ``PyYAML`` is optional: when
-``src/relationship/lexicons.yaml`` exists and PyYAML is installed, its contents
+``src/features/lexicons.yaml`` exists and PyYAML is installed, its contents
 override the built-in lexicons below.
 """
 
@@ -28,10 +27,10 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Sequence
 
 import pandas as pd
 
@@ -154,7 +153,7 @@ LEXICAL_CONFIDENCE: dict[str, float] = {
 
 @lru_cache(maxsize=4)
 def load_lexicons(config_path: str | None = None) -> dict[str, Any]:
-    """Load lexicon overrides from ``src/relationship/lexicons.yaml``.
+    """Load lexicon overrides from ``src/features/lexicons.yaml``.
 
     The YAML file is optional. When present, its top-level keys
     (``kinship_terms``, ``office_terms``, ``college_terms``, ``society_terms``,

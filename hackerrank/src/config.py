@@ -70,7 +70,7 @@ class Paths:
     # ---- YAML rule / weight files ----------------------------------------- #
     rules_yaml: Path = PROJECT_ROOT / "src" / "rules" / "rules.yaml"
     weights_yaml: Path = PROJECT_ROOT / "src" / "scoring" / "weights.yaml"
-    lexicons_yaml: Path = PROJECT_ROOT / "src" / "relationship" / "lexicons.yaml"
+    lexicons_yaml: Path = PROJECT_ROOT / "src" / "features" / "lexicons.yaml"
 
     # ---- Fitted artefacts -------------------------------------------------- #
     thresholds_json: Path = PROJECT_ROOT / "outputs" / "thresholds.json"
