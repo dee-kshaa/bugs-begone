@@ -1,22 +1,52 @@
-# Python
-__pycache__/
-*.pyc
-.venv/
-env/
-
-# macOS
-.DS_Store
-
-# VS Code
-.vscode/
-
-# Logs
-outputs/logs/
-
-# Data (don't upload competition dataset)
+# -------------------------
+# Dataset
+# -------------------------
 data/raw/
 data/cache/
 *.parquet
 
-# Optional
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+
+# -------------------------
+# Virtual environments
+# -------------------------
+venv/
+.venv/
+env/
+
+# -------------------------
+# IDE
+# -------------------------
+.vscode/
+.idea/
+
+# -------------------------
+# macOS
+# -------------------------
+.DS_Store
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+
+# -------------------------
+# Archives
+# -------------------------
+*.zip
+
+# -------------------------
+# Environment variables
+# -------------------------
+.env
+.env.*
+
+# -------------------------
+# Node (if used)
+# -------------------------
 node_modules/
