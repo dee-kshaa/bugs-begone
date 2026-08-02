@@ -1,2 +1,0 @@
-message_id,action,message_type,reason,confidence,evidence_message_ids
-m1,mute,personal,Personal message received.,0.4998,m0
