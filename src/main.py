@@ -81,13 +81,76 @@ def _clean_bool(value: Any) -> bool:
 
 def _resolve_media_type(row: pd.Series) -> MediaType:
     """Resolve a row's media type, preferring an explicit column when present."""
-    if "media_type" in row.index:
+    if "media_type" in row.index and _clean_text(row.get("media_type")):
         return MediaType.from_any(row.get("media_type"))
     if _clean_id(row.get("image_id")):
         return MediaType.IMAGE
     if _clean_id(row.get("voice_note_id")):
         return MediaType.VOICE
     return MediaType.TEXT
+
+
+def _resolve_recipient_id(row: pd.Series) -> str | None:
+    """Resolve the receiving user's id.
+
+    The official dataset names this column ``user_id``; some variants use
+    ``recipient_user_id``. ``user_id`` cannot be aliased globally because it
+    means something different in ``users.csv`` and ``group_members.csv``, so
+    the fallback is resolved here at the entrypoint instead.
+    """
+    return _clean_id(row.get("recipient_user_id")) or _clean_id(row.get("user_id"))
+
+
+def _resolve_sender_id(row: pd.Series) -> str | None:
+    """Resolve the sending party's id.
+
+    ``sender_user_id`` is aliased to ``sender_id`` by the loader. Business
+    messages in the official dataset carry no sender at all, so the business
+    account itself is treated as the sender.
+    """
+    sender_id = _clean_id(row.get("sender_id"))
+    if sender_id:
+        return sender_id
+    return _clean_id(row.get("business_id"))
+
+
+def _resolve_media_ids(row: pd.Series) -> tuple[str | None, str | None]:
+    """Split the official ``media_id`` column into image and voice-note ids.
+
+    The dataset carries a single ``media_id`` disambiguated by ``media_type``;
+    the schema keeps them as separate fields.
+
+    Returns
+    -------
+    tuple
+        ``(image_id, voice_note_id)``, at most one of which is set.
+    """
+    image_id = _clean_id(row.get("image_id"))
+    voice_note_id = _clean_id(row.get("voice_note_id"))
+    if image_id or voice_note_id:
+        return image_id, voice_note_id
+
+    media_id = _clean_id(row.get("media_id"))
+    if not media_id:
+        return None, None
+
+    media_type = _clean_text(row.get("media_type")).lower()
+    if media_type == "image":
+        return media_id, None
+    if media_type in {"voice", "audio"}:
+        return None, media_id
+    return None, None
+
+
+def _resolve_forwarded(row: pd.Series) -> bool:
+    """Resolve the forwarding flag from either a boolean or a forward count."""
+    count = row.get("forwarded_count")
+    if count is not None and not (isinstance(count, float) and pd.isna(count)):
+        try:
+            return float(count) > 0
+        except (TypeError, ValueError):
+            pass
+    return _clean_bool(row.get("is_forwarded"))
 
 
 def _resolve_conversation_type(row: pd.Series) -> ConversationType:
@@ -162,20 +225,39 @@ def build_media_path_index(repo: DataRepository) -> tuple[dict[str, str], dict[s
 
 def _resolve_media_path(
     row: pd.Series,
-    media_root_images: Path,
-    media_root_voice: Path,
+    config: AppConfig,
+    image_id: str | None = None,
+    voice_note_id: str | None = None,
     image_paths: dict[str, str] | None = None,
     voice_paths: dict[str, str] | None = None,
 ) -> str | None:
-    """Resolve a row's media file path, joining a bare filename against the media root.
+    """Resolve a row's media file to an on-disk path.
 
-    Looks first at a ``media_path`` column on the message row itself (some
-    dataset variants inline it), then falls back to the ``images.csv`` /
-    ``voice_notes.csv`` lookups built by :func:`build_media_path_index`.
+    Resolution order:
+
+    1. A ``media_path`` inlined on the message row itself.
+    2. The ``images.csv`` / ``voice_notes.csv`` lookup, whose paths in the
+       official dataset are relative to the dataset directory
+       (``media/images/img_001.jpg``, ``media/audio/vn_001.mp3``).
+    3. The configured media roots, for datasets that store bare filenames.
+
+    Parameters
+    ----------
+    row:
+        The message row.
+    config:
+        Application configuration, supplying the dataset and media roots.
+    image_id, voice_note_id:
+        Already-resolved media ids from :func:`_resolve_media_ids`.
+    image_paths, voice_paths:
+        Lookups from :func:`build_media_path_index`.
+
+    Returns
+    -------
+    str or None
+        An existing path when one can be found, the best candidate otherwise,
+        or ``None`` when the row references no media.
     """
-    image_id = _clean_id(row.get("image_id"))
-    voice_note_id = _clean_id(row.get("voice_note_id"))
-
     raw = row.get("media_path")
     text = "" if raw is None or (isinstance(raw, float) and pd.isna(raw)) else str(raw).strip()
 
@@ -190,11 +272,25 @@ def _resolve_media_path(
     candidate = Path(text)
     if candidate.is_absolute() or candidate.exists():
         return str(candidate)
+
+    # Official dataset: paths are relative to the dataset directory.
+    dataset_relative = config.paths.raw / candidate
+    if dataset_relative.exists():
+        return str(dataset_relative)
+
+    # Fallback: bare filenames stored under the configured media roots.
     if image_id:
-        return str(media_root_images / candidate)
+        root_relative = config.paths.media_images / candidate.name
+        if root_relative.exists():
+            return str(root_relative)
+        return str(dataset_relative)
     if voice_note_id:
-        return str(media_root_voice / candidate)
-    return str(candidate)
+        root_relative = config.paths.media_voice / candidate.name
+        if root_relative.exists():
+            return str(root_relative)
+        return str(dataset_relative)
+
+    return str(dataset_relative)
 
 
 def row_to_message(
@@ -204,6 +300,15 @@ def row_to_message(
     voice_paths: dict[str, str] | None = None,
 ) -> Message | None:
     """Convert one normalised ``messages.csv`` row into a :class:`~src.schema.Message`.
+
+    Handles the official HackerRank column naming, which differs from the
+    canonical names used internally:
+
+    * ``user_id`` is the *recipient*, not the sender.
+    * ``sender_user_id`` is the sender, and is empty for business messages,
+      where the business account itself is treated as the sender.
+    * ``media_id`` is a single column disambiguated by ``media_type``.
+    * ``forwarded_count`` is an integer rather than a boolean flag.
 
     Parameters
     ----------
@@ -221,15 +326,16 @@ def row_to_message(
     Returns
     -------
     Message or None
-        ``None`` when the row is missing a required field (``message_id``,
-        ``sender_id``, or a parseable ``timestamp``), so the caller can skip
+        ``None`` when the row is missing a required field (``message_id``, a
+        resolvable sender, or a parseable timestamp), so the caller can skip
         it and continue rather than aborting the whole load.
     """
     message_id = _clean_id(row.get("message_id"))
-    sender_id = _clean_id(row.get("sender_id"))
+    sender_id = _resolve_sender_id(row)
+
     if not message_id or not sender_id:
         logger.warning(
-            "row_to_message: skipping row with missing message_id/sender_id (message_id=%r)",
+            "row_to_message: skipping row with missing message_id/sender (message_id=%r)",
             message_id,
         )
         return None
@@ -239,12 +345,14 @@ def row_to_message(
         logger.warning("row_to_message: skipping message_id=%s (unparseable timestamp)", message_id)
         return None
 
+    image_id, voice_note_id = _resolve_media_ids(row)
+
     try:
         return Message(
             message_id=message_id,
             sender_id=sender_id,
             timestamp=timestamp.to_pydatetime(),
-            recipient_user_id=_clean_id(row.get("recipient_user_id")),
+            recipient_user_id=_resolve_recipient_id(row),
             conversation_id=_clean_id(row.get("conversation_id")),
             group_id=_clean_id(row.get("group_id")),
             business_id=_clean_id(row.get("business_id")),
@@ -252,17 +360,18 @@ def row_to_message(
             media_type=_resolve_media_type(row),
             conversation_type=_resolve_conversation_type(row),
             message_text=_clean_text(row.get("message_text")),
-            image_id=_clean_id(row.get("image_id")),
-            voice_note_id=_clean_id(row.get("voice_note_id")),
+            image_id=image_id,
+            voice_note_id=voice_note_id,
             media_path=_resolve_media_path(
                 row,
-                config.paths.media_images,
-                config.paths.media_voice,
+                config,
+                image_id,
+                voice_note_id,
                 image_paths,
                 voice_paths,
             ),
             mentions=_resolve_mentions(row),
-            is_forwarded=_clean_bool(row.get("is_forwarded")),
+            is_forwarded=_resolve_forwarded(row),
             is_from_business=bool(_clean_id(row.get("business_id"))),
         )
     except (ValueError, TypeError) as error:
@@ -299,17 +408,38 @@ def iter_messages(
 
     yielded = 0
     skipped = 0
+    duplicates = 0
+    seen_ids: set[str] = set()
     for _, row in frame.iterrows():
         message = row_to_message(row, config, image_paths, voice_paths)
         if message is None:
             skipped += 1
             continue
+        # A repeated message_id in the input would otherwise produce a
+        # repeated output row, which fails output validation and aborts the
+        # entire run with no file written at all. One malformed input row
+        # must not cost every other prediction, so later copies are dropped
+        # and the first occurrence wins.
+        if message.message_id in seen_ids:
+            duplicates += 1
+            logger.warning(
+                "iter_messages: duplicate message_id=%s in input; keeping the first row.",
+                message.message_id,
+            )
+            continue
+        seen_ids.add(message.message_id)
         yield message
         yielded += 1
         if limit is not None and yielded >= limit:
             break
 
-    logger.info("iter_messages: yielded %d message(s), skipped %d invalid row(s).", yielded, skipped)
+    logger.info(
+        "iter_messages: yielded %d message(s), skipped %d invalid row(s), "
+        "dropped %d duplicate id(s).",
+        yielded,
+        skipped,
+        duplicates,
+    )
 
 
 # --------------------------------------------------------------------------- #

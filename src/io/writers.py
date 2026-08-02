@@ -38,6 +38,86 @@ OUTPUT_COLUMNS: tuple[str, ...] = (
 #: Literal written when a decision has no evidence, per the task's contract.
 NO_EVIDENCE_LITERAL = "none"
 
+#: Separator between evidence ids. The task specifies semicolon-separated ids.
+EVIDENCE_SEPARATOR = ";"
+
+#: Mapping from the internal :class:`~src.schema.MessageType` vocabulary onto
+#: the closed set the task requires:
+#: ``personal, urgent, event, payment, business_update, promotion, greeting,
+#: forward, spam, scam, unknown``.
+#:
+#: The internal taxonomy was designed before the official vocabulary was known;
+#: mapping at the output boundary keeps every upstream module unchanged while
+#: guaranteeing that only valid labels are ever emitted.
+OFFICIAL_MESSAGE_TYPES: frozenset[str] = frozenset(
+    {
+        "personal",
+        "urgent",
+        "event",
+        "payment",
+        "business_update",
+        "promotion",
+        "greeting",
+        "forward",
+        "spam",
+        "scam",
+        "unknown",
+    }
+)
+
+MESSAGE_TYPE_MAP: dict[str, str] = {
+    "personal": "personal",
+    "group_chat": "personal",
+    "work": "personal",
+    "otp": "urgent",
+    "reminder": "event",
+    "transactional": "business_update",
+    "promotional": "promotion",
+    "media_share": "unknown",
+    "forward": "forward",
+    "spam": "spam",
+    "other": "unknown",
+}
+
+#: Reason-text fragments that indicate the message is a scam rather than
+#: generic spam. The rule engine collapses both onto ``spam`` internally, but
+#: the task scores ``scam`` separately, so it is recovered here.
+_SCAM_REASON_MARKERS: tuple[str, ...] = (
+    "phishing",
+    "scam",
+)
+
+
+def to_official_message_type(message_type: str, reason: str = "") -> str:
+    """Map an internal message type onto the task's required vocabulary.
+
+    Parameters
+    ----------
+    message_type:
+        Internal :class:`~src.schema.MessageType` value.
+    reason:
+        The decision's reason text, used to separate ``scam`` from ``spam``
+        since the internal taxonomy collapses the two.
+
+    Returns
+    -------
+    str
+        A member of :data:`OFFICIAL_MESSAGE_TYPES`; ``unknown`` when the input
+        cannot be mapped.
+    """
+    normalised = str(message_type).strip().lower()
+
+    if normalised == "spam":
+        lowered = reason.lower()
+        if any(marker in lowered for marker in _SCAM_REASON_MARKERS):
+            return "scam"
+        return "spam"
+
+    if normalised in OFFICIAL_MESSAGE_TYPES:
+        return normalised
+
+    return MESSAGE_TYPE_MAP.get(normalised, "unknown")
+
 #: Decimal places for the confidence column. Fixed so every row formats
 #: identically regardless of how the value was computed upstream.
 CONFIDENCE_DECIMALS = 4
@@ -92,7 +172,7 @@ def format_evidence(evidence_message_ids: Sequence[str]) -> str:
     cleaned = [str(item).strip() for item in evidence_message_ids if str(item).strip()]
     if not cleaned:
         return NO_EVIDENCE_LITERAL
-    return "|".join(cleaned)
+    return EVIDENCE_SEPARATOR.join(cleaned)
 
 
 def decision_to_row(decision: Decision) -> dict[str, str]:
@@ -129,7 +209,7 @@ def decision_to_row(decision: Decision) -> dict[str, str]:
     return {
         "message_id": decision.message_id,
         "action": action.value,
-        "message_type": message_type.value,
+        "message_type": to_official_message_type(message_type.value, decision.reason),
         "reason": decision.reason,
         "confidence": format_confidence(decision.confidence),
         "evidence_message_ids": format_evidence(decision.evidence_message_ids),
@@ -172,7 +252,7 @@ def validate_rows(rows: Sequence[dict[str, str]]) -> None:
 
         if row["action"] not in {a.value for a in Action}:
             problems.append(f"row {index} ({message_id}): invalid action {row['action']!r}")
-        if row["message_type"] not in {t.value for t in MessageType}:
+        if row["message_type"] not in OFFICIAL_MESSAGE_TYPES:
             problems.append(
                 f"row {index} ({message_id}): invalid message_type {row['message_type']!r}"
             )
@@ -313,6 +393,10 @@ def read_output_csv_for_check(path: Path | str) -> list[dict[str, Any]]:
 
 __all__ = [
     "CONFIDENCE_DECIMALS",
+    "EVIDENCE_SEPARATOR",
+    "MESSAGE_TYPE_MAP",
+    "OFFICIAL_MESSAGE_TYPES",
+    "to_official_message_type",
     "NO_EVIDENCE_LITERAL",
     "OUTPUT_COLUMNS",
     "OutputValidationError",

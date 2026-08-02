@@ -21,6 +21,7 @@ Dependencies
 
 from __future__ import annotations
 
+import csv
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -349,18 +350,80 @@ def _read_csv(path: Path) -> pd.DataFrame:
         If no known encoding could decode the file.
     """
     last_error: UnicodeDecodeError | None = None
+    na_values = ["", "NA", "N/A", "null", "NULL", "None"]
+
     for encoding in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             return pd.read_csv(
                 path,
                 encoding=encoding,
                 keep_default_na=True,
-                na_values=["", "NA", "N/A", "null", "NULL", "None"],
+                na_values=na_values,
                 low_memory=False,
             )
         except UnicodeDecodeError as error:
             last_error = error
             logger.debug("Encoding %s failed for %s, trying next.", encoding, path.name)
+        except pd.errors.ParserError as error:
+            # A single malformed row -- an unterminated quote, a ragged line --
+            # would otherwise abort the whole load and leave the run with no
+            # output at all. Retry with the tolerant Python engine and skip
+            # only the rows that cannot be parsed, so one bad line costs one
+            # prediction rather than every prediction.
+            logger.error(
+                "%s: malformed CSV (%s); retrying with a tolerant parser and "
+                "skipping unparseable rows.",
+                path.name,
+                error,
+            )
+            try:
+                frame = pd.read_csv(
+                    path,
+                    encoding=encoding,
+                    keep_default_na=True,
+                    na_values=na_values,
+                    engine="python",
+                    on_bad_lines="skip",
+                )
+                if not frame.empty:
+                    logger.warning(
+                        "%s: recovered %d row(s) after skipping malformed lines.",
+                        path.name,
+                        len(frame),
+                    )
+                    return frame
+
+                # An unterminated quote makes the rest of the file a single
+                # field, so skipping bad lines recovers nothing. Re-read with
+                # quote processing disabled, which treats the stray quote as
+                # an ordinary character and preserves every remaining row.
+                logger.error(
+                    "%s: tolerant parse recovered no rows; retrying with quoting "
+                    "disabled.",
+                    path.name,
+                )
+                frame = pd.read_csv(
+                    path,
+                    encoding=encoding,
+                    keep_default_na=True,
+                    na_values=na_values,
+                    engine="python",
+                    on_bad_lines="skip",
+                    quoting=csv.QUOTE_NONE,
+                )
+                logger.warning(
+                    "%s: recovered %d row(s) with quoting disabled.",
+                    path.name,
+                    len(frame),
+                )
+                return frame
+            except Exception as recovery_error:  # noqa: BLE001 - last resort
+                logger.error(
+                    "%s: tolerant parse also failed (%s); returning an empty frame.",
+                    path.name,
+                    recovery_error,
+                )
+                return pd.DataFrame()
 
     raise UnicodeDecodeError(
         "utf-8",

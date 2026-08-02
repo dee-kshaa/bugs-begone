@@ -226,7 +226,6 @@ COLUMN_ALIASES: Final[dict[str, str]] = {
     "from_user": "sender_id",
     "from_id": "sender_id",
     "sender": "sender_id",
-    "sender_user_id": "sender_id",
     "to_user": "recipient_user_id",
     "receiver_id": "recipient_user_id",
     "recipient_id": "recipient_user_id",
@@ -415,17 +414,9 @@ class ScoringConfig:
 class ThresholdConfig:
     """Priority-score cut points and the grid search that fits them."""
 
-    #: Fitted against the 30 labelled rows in ``dataset/sample_messages.csv``
-    #: by grid search over both cut points, selecting the centre of the
-    #: accuracy plateau rather than its edge. Dev accuracy 66.7%,
-    #: leave-one-out 53.3%, versus 40.0% for the original (38, 71).
-    #:
-    #: The original cuts assumed the component caps would be well utilised and
-    #: scores would span most of 0-100. In practice observed scores span
-    #: roughly 0-42, so a notify cut of 71 was unreachable and no message was
-    #: ever routed to notify. ``outputs/thresholds.json`` still wins when present.
-    mute_digest_cut: float = 11.0
-    digest_notify_cut: float = 28.0
+    #: Defaults only -- ``outputs/thresholds.json`` wins when present.
+    mute_digest_cut: float = 38.0
+    digest_notify_cut: float = 71.0
 
     #: Grid search bounds and step for ``scoring/thresholds.py``.
     search_min: float = 0.0

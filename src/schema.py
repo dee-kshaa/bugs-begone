@@ -106,9 +106,29 @@ class Action(str, Enum):
 
 
 class MessageType(str, Enum):
-    """Closed vocabulary for the predicted ``message_type`` field."""
+    """Vocabulary for the predicted ``message_type`` field.
 
+    The first block is the task's official closed vocabulary, which is what
+    ``output.csv`` must contain. The second block is the internal taxonomy the
+    rule and content layers were built against; it is retained for backward
+    compatibility and mapped onto the official values at the output boundary
+    by :func:`src.io.writers.to_official_message_type`.
+    """
+
+    # ---- official task vocabulary ---------------------------------------- #
     PERSONAL = "personal"
+    URGENT = "urgent"
+    EVENT = "event"
+    PAYMENT = "payment"
+    BUSINESS_UPDATE = "business_update"
+    PROMOTION = "promotion"
+    GREETING = "greeting"
+    FORWARD = "forward"
+    SPAM = "spam"
+    SCAM = "scam"
+    UNKNOWN = "unknown"
+
+    # ---- internal taxonomy (mapped on output) ---------------------------- #
     GROUP_CHAT = "group_chat"
     WORK = "work"
     OTP = "otp"
@@ -116,8 +136,6 @@ class MessageType(str, Enum):
     PROMOTIONAL = "promotional"
     REMINDER = "reminder"
     MEDIA_SHARE = "media_share"
-    FORWARD = "forward"
-    SPAM = "spam"
     OTHER = "other"
 
     @classmethod

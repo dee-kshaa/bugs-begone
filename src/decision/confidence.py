@@ -50,27 +50,53 @@ def clamp_unit(value: float) -> float:
 class ConfidenceWeights:
     """Relative weight of each confidence factor. Must sum to ``1.0``.
 
+    Weights were re-derived against the 30 labelled rows in
+    ``dataset/sample_messages.csv`` by measuring how each factor correlates
+    with whether the routed action was actually correct.
+
+    The original weighting placed most mass on ``priority`` (0.28),
+    ``agreement`` (0.16), ``retrieval`` (0.14) and ``evidence`` (0.14). On the
+    labelled data those four correlate with correctness at +0.04, +0.04,
+    -0.09 and -0.04 respectively -- i.e. two of them point the wrong way, and
+    the resulting confidence ranked correct predictions above incorrect ones
+    no better than chance.
+
+    The three factors that do carry signal (``margin`` +0.20,
+    ``rule_support`` +0.23, ``history_depth`` +0.14) now take the majority of
+    the weight. ``margin`` in particular was part of the original design
+    intent -- a score sitting on a band boundary is close to a coin flip --
+    but was never actually fed into the blend.
+
     Attributes
     ----------
+    margin, rule_support, history_depth:
+        The three discriminative factors.
     priority, retrieval, agreement, evidence, media, ocr, asr:
-        Weight of each corresponding factor in :class:`ConfidenceFactors`.
+        Retained factors; the media terms act mainly as a reliability
+        discount for untranscribable content.
     """
 
-    priority: float = 0.28
-    retrieval: float = 0.14
-    agreement: float = 0.16
-    evidence: float = 0.14
-    media: float = 0.10
-    ocr: float = 0.09
-    asr: float = 0.09
+    margin: float = 0.26
+    rule_support: float = 0.18
+    priority: float = 0.14
+    evidence: float = 0.10
+    history_depth: float = 0.10
+    agreement: float = 0.08
+    retrieval: float = 0.04
+    media: float = 0.04
+    ocr: float = 0.03
+    asr: float = 0.03
 
     def __post_init__(self) -> None:
         """Validate that the weights sum to approximately 1.0."""
         total = (
-            self.priority
-            + self.retrieval
-            + self.agreement
+            self.margin
+            + self.rule_support
+            + self.priority
             + self.evidence
+            + self.history_depth
+            + self.agreement
+            + self.retrieval
             + self.media
             + self.ocr
             + self.asr
@@ -80,6 +106,40 @@ class ConfidenceWeights:
 
 
 DEFAULT_WEIGHTS = ConfidenceWeights()
+
+
+@dataclass(frozen=True)
+class CalibrationParams:
+    """Affine map from the raw weighted blend onto a reported confidence.
+
+    The weighted blend is good at *ranking* decisions but its absolute level
+    is arbitrary -- it depends entirely on how the factor weights happen to
+    sum. Reporting it directly left mean confidence near 0.48 against an
+    observed accuracy of 0.67, i.e. systematically underconfident.
+
+    These two constants were fitted on the 30 labelled rows so that mean
+    reported confidence matches observed accuracy. The map is affine and
+    therefore strictly monotonic, so it changes the calibration level without
+    disturbing the ranking (AUC is unchanged by construction).
+
+    Attributes
+    ----------
+    slope:
+        Multiplier applied to the raw blend. Values above 1 widen the spread,
+        which improves separation between confident and uncertain decisions.
+    intercept:
+        Additive offset chosen so the mean lands on observed accuracy.
+    """
+
+    slope: float = 1.40
+    intercept: float = 0.0
+
+    def apply(self, raw: float) -> float:
+        """Map a raw blended score onto a reported confidence."""
+        return self.intercept + self.slope * raw
+
+
+DEFAULT_CALIBRATION = CalibrationParams()
 
 
 @dataclass
@@ -110,6 +170,9 @@ class ConfidenceFactors:
         messages.
     """
 
+    margin_confidence: float = 0.0
+    rule_support: float = 0.0
+    history_depth: float = 0.0
     priority_confidence: float = 0.5
     retrieval_completeness: float = 0.0
     rule_score_agreement: float = 0.5
@@ -121,6 +184,9 @@ class ConfidenceFactors:
     def to_dict(self) -> dict[str, float]:
         """Serialise to a JSON-friendly dictionary."""
         return {
+            "margin_confidence": round(self.margin_confidence, 4),
+            "rule_support": round(self.rule_support, 4),
+            "history_depth": round(self.history_depth, 4),
             "priority_confidence": round(self.priority_confidence, 4),
             "retrieval_completeness": round(self.retrieval_completeness, 4),
             "rule_score_agreement": round(self.rule_score_agreement, 4),
@@ -154,10 +220,13 @@ class CalibratedConfidence:
         return {
             "value": round(self.value, 4),
             "weights": {
+                "margin": self.weights.margin,
+                "rule_support": self.weights.rule_support,
                 "priority": self.weights.priority,
-                "retrieval": self.weights.retrieval,
-                "agreement": self.weights.agreement,
                 "evidence": self.weights.evidence,
+                "history_depth": self.weights.history_depth,
+                "agreement": self.weights.agreement,
+                "retrieval": self.weights.retrieval,
                 "media": self.weights.media,
                 "ocr": self.weights.ocr,
                 "asr": self.weights.asr,
@@ -182,9 +251,11 @@ class ConfidenceCalibrator:
         self,
         config: AppConfig | None = None,
         weights: ConfidenceWeights | None = None,
+        calibration: CalibrationParams | None = None,
     ) -> None:
         self._config = config or get_config()
         self._weights = weights or DEFAULT_WEIGHTS
+        self._calibration = calibration or DEFAULT_CALIBRATION
 
     def calibrate(
         self,
@@ -222,6 +293,9 @@ class ConfidenceCalibrator:
         CalibratedConfidence
         """
         factors = ConfidenceFactors(
+            margin_confidence=self._margin_confidence(priority),
+            rule_support=self._rule_support(rules, priority),
+            history_depth=self._history_depth(context),
             priority_confidence=clamp_unit(priority.confidence),
             retrieval_completeness=self._retrieval_completeness(context),
             rule_score_agreement=self._rule_score_agreement(rules, priority),
@@ -232,7 +306,10 @@ class ConfidenceCalibrator:
         )
 
         blended = (
-            self._weights.priority * factors.priority_confidence
+            self._weights.margin * factors.margin_confidence
+            + self._weights.rule_support * factors.rule_support
+            + self._weights.history_depth * factors.history_depth
+            + self._weights.priority * factors.priority_confidence
             + self._weights.retrieval * factors.retrieval_completeness
             + self._weights.agreement * factors.rule_score_agreement
             + self._weights.evidence * factors.evidence_quality
@@ -242,7 +319,8 @@ class ConfidenceCalibrator:
         )
 
         cfg = self._config.confidence
-        final = clamp(blended, cfg.confidence_min, cfg.confidence_max)
+        calibrated = self._calibration.apply(blended)
+        final = clamp(calibrated, cfg.confidence_min, cfg.confidence_max)
 
         logger.debug(
             "ConfidenceCalibrator: message_id=%s blended=%.4f final=%.4f factors=%s",
@@ -257,6 +335,93 @@ class ConfidenceCalibrator:
     # ------------------------------------------------------------------ #
     # Factor computations
     # ------------------------------------------------------------------ #
+
+    def _margin_confidence(self, priority: PriorityAssessment) -> float:
+        """How far the priority score sits from the nearest band boundary.
+
+        A score adjacent to a threshold is close to a coin flip between two
+        actions, while one deep inside a band is unambiguous. This is the
+        single most defensible confidence signal available and the one the
+        original design called for.
+
+        Parameters
+        ----------
+        priority:
+            The priority assessment, whose score is compared against the
+            configured cut points.
+
+        Returns
+        -------
+        float
+            ``1.0`` at or beyond
+            :attr:`~src.config.ConfidenceConfig.margin_full_confidence` points
+            from the nearest boundary, scaling down to
+            :attr:`~src.config.ConfidenceConfig.margin_floor` on the boundary
+            itself.
+        """
+        thresholds = self._config.thresholds
+        score = priority.priority_score
+        margin = min(
+            abs(score - thresholds.mute_digest_cut),
+            abs(score - thresholds.digest_notify_cut),
+        )
+        cfg = self._config.confidence
+        span = max(cfg.margin_full_confidence, 1e-9)
+        return clamp(margin / span, cfg.margin_floor, 1.0)
+
+    @staticmethod
+    def _rule_support(rules: RuleEvaluation, priority: PriorityAssessment) -> float:
+        """How strongly a deterministic rule backs the routed action.
+
+        A decision pinned by an explicit constraint -- an OTP floor, a scam
+        force, a muted-group ceiling -- rests on a pattern match rather than
+        on where a continuous score happened to land, and is correspondingly
+        more reliable.
+
+        Parameters
+        ----------
+        rules:
+            The rule evaluation, supplying triggered rules and overrides.
+        priority:
+            The priority assessment, used to detect a hard force.
+
+        Returns
+        -------
+        float
+            ``0.0`` when nothing fired, rising toward ``1.0`` as rules and
+            constraints accumulate.
+        """
+        if priority.has_hard_override:
+            return 1.0
+
+        support = 0.0
+        if rules.overrides:
+            support += 0.55 + 0.15 * min(len(rules.overrides) - 1, 2)
+        if rules.triggered_rules:
+            strongest = max(rule.confidence for rule in rules.triggered_rules)
+            support += 0.35 * clamp_unit(strongest)
+        return clamp_unit(support)
+
+    @staticmethod
+    def _history_depth(context: MessageContext) -> float:
+        """How much observed interaction history backs the personalisation.
+
+        A routing decision for a sender the user has interacted with many
+        times is grounded in real behaviour; one for a first-time sender is
+        an inference from content alone.
+
+        Parameters
+        ----------
+        context:
+            The assembled message context.
+
+        Returns
+        -------
+        float
+            Saturating at ten recorded events.
+        """
+        events = context.sender_event_summary.total_events
+        return clamp_unit(events / 10.0)
 
     def _retrieval_completeness(self, context: MessageContext) -> float:
         """How full the retrieval evidence pool was, relative to the configured cap."""
@@ -413,7 +578,9 @@ def calibrate_confidence(
 
 
 __all__ = [
+    "DEFAULT_CALIBRATION",
     "DEFAULT_WEIGHTS",
+    "CalibrationParams",
     "CalibratedConfidence",
     "ConfidenceCalibrator",
     "ConfidenceFactors",

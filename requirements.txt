@@ -1,0 +1,11 @@
+# Core (required)
+pandas>=2.0
+pyarrow>=14.0
+
+# Media enrichment (optional -- the pipeline degrades gracefully without them)
+pytesseract>=0.3.10
+pillow>=10.0
+openai-whisper>=20231117
+
+# Optional: lexicon overrides via src/relationship/lexicons.yaml
+PyYAML>=6.0

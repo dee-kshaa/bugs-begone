@@ -67,6 +67,15 @@ _BLOCKED_CONTACTS_COLUMNS = ("blocked_contacts", "blocked_users")
 #: Column candidates for an event-type column in message_events.csv.
 _EVENT_TYPE_COLUMNS = ("event_type", "event", "action", "status")
 
+#: Boolean indicator columns used by the official dataset, which records one
+#: row per (user, message) with 0/1 flags rather than a categorical event type.
+_BOOL_EVENT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "opens": ("message_opened", "opened", "is_opened"),
+    "replies": ("message_replied", "replied", "is_replied"),
+    "dismissals": ("notification_dismissed", "dismissed", "is_dismissed"),
+    "reports": ("message_reported", "reported", "is_reported"),
+}
+
 #: Event values, normalised, that count toward each summary bucket.
 _OPEN_EVENTS = {"read", "open", "opened", "seen", "viewed"}
 _REPLY_EVENTS = {"reply", "replied", "responded", "react", "reacted"}
@@ -205,6 +214,15 @@ class MessageContext:
 
     conversation_history_ids: tuple[str, ...] = ()
 
+    #: Historical message ids this user reported. Evidence selection promotes
+    #: these when the current message looks like a scam or spam, since a prior
+    #: report is the strongest possible corroboration of a risk finding.
+    reported_message_ids: frozenset[str] = frozenset()
+
+    #: Historical message ids from the same business account, used to ground
+    #: business decisions in the user's actual history with that sender.
+    business_history_ids: tuple[str, ...] = ()
+
     retrieval: RetrievalContext = field(default_factory=lambda: RetrievalContext(message_id=""))
 
     def to_dict(self) -> dict[str, Any]:
@@ -224,6 +242,8 @@ class MessageContext:
             "is_reported_recently": self.is_reported_recently,
             "report_count": self.report_count,
             "conversation_history_ids": list(self.conversation_history_ids),
+            "reported_message_ids": sorted(self.reported_message_ids),
+            "business_history_ids": list(self.business_history_ids),
             "retrieval": self.retrieval.to_dict(),
         }
 
@@ -233,12 +253,35 @@ class MessageContext:
 # --------------------------------------------------------------------------- #
 
 
+def _count_flag(frame: pd.DataFrame, candidates: tuple[str, ...]) -> int | None:
+    """Count truthy values in the first present boolean indicator column.
+
+    Returns ``None`` when none of ``candidates`` is present, so the caller can
+    fall back to the categorical-event schema.
+    """
+    column = _first_present(frame, candidates)
+    if column is None:
+        return None
+    series = frame[column]
+    if pd.api.types.is_numeric_dtype(series):
+        return int((series.fillna(0) > 0).sum())
+    normalised = series.astype(str).str.strip().str.lower()
+    return int(normalised.isin({"1", "true", "yes", "y", "t"}).sum())
+
+
 def _event_summary_for(
     events: pd.DataFrame,
     message_ids: set[str],
     user_id: str | None,
 ) -> EventSummary:
-    """Summarise a user's events over a specific set of message ids."""
+    """Summarise a user's events over a specific set of message ids.
+
+    Supports both event schemas seen in practice: a categorical ``event_type``
+    column, and the official dataset's one-row-per-(user, message) layout with
+    boolean indicator columns (``message_opened``, ``message_replied``,
+    ``notification_dismissed``, ``message_reported``). The boolean layout is
+    checked first, since it carries strictly more information per row.
+    """
     summary = EventSummary()
     if events.empty or not message_ids or "message_id" not in events.columns:
         return summary
@@ -247,6 +290,20 @@ def _event_summary_for(
     if user_id and "user_id" in subset.columns:
         subset = subset[subset["user_id"].astype(str) == str(user_id)]
     if subset.empty:
+        return summary
+
+    opens = _count_flag(subset, _BOOL_EVENT_COLUMNS["opens"])
+    if opens is not None:
+        summary.opens = opens
+        summary.replies = _count_flag(subset, _BOOL_EVENT_COLUMNS["replies"]) or 0
+        summary.dismissals = _count_flag(subset, _BOOL_EVENT_COLUMNS["dismissals"]) or 0
+        summary.reports = _count_flag(subset, _BOOL_EVENT_COLUMNS["reports"]) or 0
+        summary.total_events = int(len(subset))
+        time_column = _first_present(subset, ("timestamp", "event_time"))
+        if time_column is not None:
+            stamps = pd.to_datetime(subset[time_column], errors="coerce").dropna()
+            if not stamps.empty:
+                summary.last_event_at = stamps.max().to_pydatetime()
         return summary
 
     event_column = _first_present(subset, _EVENT_TYPE_COLUMNS)
@@ -334,12 +391,18 @@ def _build_user_profile(
 
     if not events.empty and "user_id" in events.columns:
         user_events = events[events["user_id"].astype(str) == str(user_id)]
-        event_column = _first_present(user_events, _EVENT_TYPE_COLUMNS)
-        if event_column is not None and not user_events.empty:
-            values = user_events[event_column].astype(str).str.lower()
-            total = len(user_events)
-            overall_open_rate = min(int(values.isin(_OPEN_EVENTS).sum()) / total, 1.0)
-            overall_reply_rate = min(int(values.isin(_REPLY_EVENTS).sum()) / total, 1.0)
+        total = len(user_events)
+        opens = _count_flag(user_events, _BOOL_EVENT_COLUMNS["opens"]) if total else None
+        if opens is not None and total:
+            replies = _count_flag(user_events, _BOOL_EVENT_COLUMNS["replies"]) or 0
+            overall_open_rate = min(opens / total, 1.0)
+            overall_reply_rate = min(replies / total, 1.0)
+        else:
+            event_column = _first_present(user_events, _EVENT_TYPE_COLUMNS)
+            if event_column is not None and not user_events.empty:
+                values = user_events[event_column].astype(str).str.lower()
+                overall_open_rate = min(int(values.isin(_OPEN_EVENTS).sum()) / total, 1.0)
+                overall_reply_rate = min(int(values.isin(_REPLY_EVENTS).sum()) / total, 1.0)
 
         time_column = _first_present(user_events, ("timestamp", "event_time"))
         if time_column is not None and not user_events.empty:
@@ -439,6 +502,64 @@ class ContextRetriever:
 
         self._user_profile_cache: dict[str, UserProfile] = {}
 
+        # Evidence must cite *historical* messages. The combined frame unions
+        # messages.csv with message_history.csv, so without this restriction
+        # the retrieval pool can offer another message from the current batch
+        # as evidence, which the task's output contract does not allow.
+        self._history_ids: frozenset[str] = frozenset()
+        if not repo.message_history.empty and "message_id" in repo.message_history.columns:
+            self._history_ids = frozenset(
+                str(value).strip()
+                for value in repo.message_history["message_id"]
+                if str(value).strip()
+            )
+        logger.info(
+            "ContextRetriever: %d historical message id(s) eligible as evidence.",
+            len(self._history_ids),
+        )
+
+        self._reported_by_user = self._build_reported_index(repo.message_events)
+
+    @staticmethod
+    def _build_reported_index(events: pd.DataFrame) -> dict[str, frozenset[str]]:
+        """Build ``{user_id -> reported message ids}`` from the events frame.
+
+        Supports both the boolean-indicator layout used by the official
+        dataset (``message_reported``) and a categorical ``event_type``
+        column.
+        """
+        index: dict[str, set[str]] = {}
+        if events.empty or "message_id" not in events.columns:
+            return {}
+
+        column = _first_present(events, ("message_reported", "reported", "is_reported"))
+        if column is not None:
+            series = events[column]
+            if pd.api.types.is_numeric_dtype(series):
+                mask = series.fillna(0) > 0
+            else:
+                mask = series.astype(str).str.strip().str.lower().isin(
+                    {"1", "true", "yes", "y", "t"}
+                )
+            reported = events[mask]
+        else:
+            event_column = _first_present(events, _EVENT_TYPE_COLUMNS)
+            if event_column is None:
+                return {}
+            reported = events[
+                events[event_column].astype(str).str.lower().isin(_REPORT_EVENTS)
+            ]
+
+        for _, row in reported.iterrows():
+            user = str(row.get("user_id", "")).strip()
+            message_id = str(row.get("message_id", "")).strip()
+            if message_id:
+                index.setdefault(user, set()).add(message_id)
+
+        total = sum(len(v) for v in index.values())
+        logger.info("ContextRetriever: indexed %d reported message(s).", total)
+        return {k: frozenset(v) for k, v in index.items()}
+
     # ---- profile accessors -------------------------------------------------- #
 
     def get_user_profile(self, user_id: str | None) -> UserProfile | None:
@@ -531,22 +652,39 @@ class ContextRetriever:
 
         pool = lexical.deduplicate_candidates(structural + relational + business)
 
+        # Evidence may only cite historical messages, never another message
+        # from the batch currently being routed.
+        if self._history_ids:
+            pool = [c for c in pool if c.message_id in self._history_ids]
+
         lexical_hits: list[RetrievalCandidate] = []
         used_lexical = False
-        if len(pool) < cfg.lexical_trigger_below and message.content.strip():
+        # The lexical tier is now always consulted rather than only when the
+        # structural/relational tiers come back thin. Restricting the pool to
+        # history makes those tiers sparser, and semantic similarity is the
+        # signal most likely to surface the one prior message that actually
+        # explains the decision.
+        if message.content.strip():
+            # Search all history rather than only this sender's, so a
+            # near-identical scam or promo from a *different* sender can still
+            # be surfaced as corroborating evidence.
             search_frame = self._messages
-            if peer_id and "sender_id" in search_frame.columns:
+            if self._history_ids and "message_id" in search_frame.columns:
                 search_frame = search_frame[
-                    search_frame["sender_id"].astype(str) == str(peer_id)
+                    search_frame["message_id"].astype(str).isin(self._history_ids)
                 ]
             lexical_hits = lexical.similar_message_lookup(
                 search_frame,
                 query_text=message.content,
                 reference_time=reference_time,
-                top_k=cfg.lexical_top_k,
+                top_k=max(cfg.lexical_top_k, 3),
                 horizon_hours=cfg.recency_horizon_hours,
                 max_snippet_chars=cfg.candidate_snippet_chars,
             )
+            if self._history_ids:
+                lexical_hits = [
+                    c for c in lexical_hits if c.message_id in self._history_ids
+                ]
             used_lexical = bool(lexical_hits)
             pool = lexical.deduplicate_candidates(pool + lexical_hits)
 
@@ -616,6 +754,9 @@ class ContextRetriever:
 
         retrieval_context = self._build_retrieval_context(message, peer_id)
 
+        reported_ids = self._reported_by_user.get(str(recipient or ""), frozenset())
+        business_history_ids = self._business_history_ids(message.business_id)
+
         return MessageContext(
             message_id=message.message_id,
             user=user,
@@ -631,6 +772,8 @@ class ContextRetriever:
             is_reported_recently=is_reported_recently,
             report_count=report_count,
             conversation_history_ids=conversation_history_ids,
+            reported_message_ids=reported_ids,
+            business_history_ids=business_history_ids,
             retrieval=retrieval_context,
         )
 
@@ -641,6 +784,22 @@ class ContextRetriever:
         if not group_id:
             return ()
         return _group_admin_ids(self._repo.group_members, str(group_id))
+
+    def _business_history_ids(self, business_id: str | None) -> tuple[str, ...]:
+        """Return historical message ids sent by one business account."""
+        if not business_id or self._messages.empty:
+            return ()
+        if "business_id" not in self._messages.columns or "message_id" not in self._messages.columns:
+            return ()
+        subset = self._messages[
+            self._messages["business_id"].astype(str) == str(business_id)
+        ]
+        ids = [
+            str(value)
+            for value in subset["message_id"]
+            if not self._history_ids or str(value) in self._history_ids
+        ]
+        return tuple(ids)
 
     def _message_ids_for_sender(self, sender_id: str | None) -> set[str]:
         """Return every message id sent by ``sender_id`` in the combined frame."""

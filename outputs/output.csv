@@ -1,0 +1,111 @@
+message_id,action,message_type,reason,confidence,evidence_message_ids
+msg_023,digest,business_update,"A verified business sent an order update, but it is not urgent enough to interrupt.",0.5839,message_0243;message_0263;message_0407
+msg_091,mute,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0238
+msg_090,mute,unknown,"An unfamiliar sender sent a message with no clear purpose, so it is held back.",0.5243,message_0214;message_0173
+msg_048,digest,forward,"A trusted group admin sent a forwarded chain message, but it is not urgent enough to interrupt.",0.8798,message_0152;message_0151
+msg_040,digest,greeting,"A trusted family member sent a routine greeting, but it is not urgent enough to interrupt.",0.5915,message_0241
+msg_075,notify,business_update,"A verified business sent an order update, so it should reach the user now.",0.8984,message_0206;message_0205
+msg_005,digest,event,"An unfamiliar sender sent a scheduled update, but it is not urgent enough to interrupt.",0.6382,message_0224
+msg_104,digest,event,"An unfamiliar sender sent a scheduled update, but it is not urgent enough to interrupt.",0.7157,message_0115
+msg_069,digest,greeting,"A trusted family member sent a routine greeting, but it is not urgent enough to interrupt.",0.8142,message_0194;message_0136;message_0078
+msg_107,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.9700,message_0235
+msg_070,mute,personal,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0369
+msg_003,digest,business_update,"A verified business sent an order update, but it is not urgent enough to interrupt.",0.6353,message_0297;message_0004;message_0239
+msg_099,digest,personal,"An unfamiliar sender sent a personal message, but it is not urgent enough to interrupt.",0.6921,message_0371
+msg_008,digest,business_update,"A verified business sent an order update, but it is not urgent enough to interrupt.",0.7297,message_0072;message_0071;message_0296
+msg_092,digest,payment,"A verified business sent a payment reminder, but it is not urgent enough to interrupt.",0.5256,message_0102
+msg_060,notify,promotion,"A trusted group admin sent a promotional offer, so it should reach the user now.",0.6405,message_0176;message_0404;message_0284
+msg_004,notify,event,"A verified business sent a scheduled update, so it should reach the user now.",0.8752,message_0005;message_0245;message_0047
+msg_030,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.7187,message_0115;message_0390;message_0113
+msg_045,digest,personal,"A society contact sent a personal message, but it is not urgent enough to interrupt.",0.5942,message_0146;message_0145
+msg_052,mute,promotion,"An unfamiliar sender sent a promotional offer, the user never opted into, so it is held back.",0.8613,message_0208
+msg_009,notify,personal,"A close contact sent a personal message the user usually opens, so it should reach the user now.",0.6411,message_0313;message_0292;message_0074
+msg_071,notify,personal,"A trusted family member sent a personal message, so it should reach the user now.",0.9700,message_0035;message_0148;message_0147
+msg_016,mute,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0214;message_0173;message_0024
+msg_065,mute,promotion,"A verified business sent a promotional offer, the user never opted into, so it is held back.",0.7494,message_0351;message_0261;message_0186
+msg_038,digest,forward,"A college contact sent a forwarded chain message, but it is not urgent enough to interrupt.",0.6877,message_0131;message_0132;message_0247
+msg_086,mute,spam,"A verified business sent bulk promotional content as a voice note, the user never opted into, so it is held back.",0.5252,message_0272;message_0109
+msg_014,digest,promotion,"A verified business sent a promotional offer, but it is not urgent enough to interrupt.",0.7355,message_0018;message_0258;message_0317
+msg_094,mute,promotion,"A verified business sent a promotional offer, the user never opted into, so it is held back.",0.7723,message_0257
+msg_029,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.7856,message_0115
+msg_105,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.5698,message_0373
+msg_002,digest,event,"A trusted group admin sent a scheduled update, but it is not urgent enough to interrupt.",0.7688,message_0249;message_0170;message_0169
+msg_010,digest,business_update,"A verified business sent an order update, but it is not urgent enough to interrupt.",0.5091,message_0311;message_0011;message_0242
+msg_078,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.8488,message_0236
+msg_013,notify,promotion,"A college contact sent a promotional offer, so it should reach the user now.",0.9700,message_0082
+msg_018,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.9174,message_0026
+msg_044,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.9412,message_0095
+msg_032,digest,personal,"An unfamiliar sender sent a personal message, but it is not urgent enough to interrupt.",0.6187,message_0285;message_0325;message_0120
+msg_106,digest,event,"An unfamiliar sender sent a scheduled update, but it is not urgent enough to interrupt.",0.5824,message_0376
+msg_006,notify,personal,"A trusted group admin sent a personal message, so it should reach the user now.",0.8097,message_0057;message_0015
+msg_109,digest,payment,"A trusted group admin sent a payment reminder, but it is not urgent enough to interrupt.",0.8756,message_0152;message_0151
+msg_108,mute,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9421,message_0094;message_0093
+msg_019,mute,promotion,"An unfamiliar sender sent a promotional offer, the user never opted into, so it is held back.",0.7505,message_0094
+msg_088,mute,personal,"An unfamiliar sender sent a personal message as a voice note, which the user usually ignores, so it is held back.",0.5857,none
+msg_056,notify,event,"A trusted family member sent a scheduled update, time-critical enough to interrupt the user.",0.9700,message_0226
+msg_027,digest,promotion,"A verified business sent a promotional offer, but it is not urgent enough to interrupt.",0.8689,message_0396;message_0299;message_0007
+msg_050,notify,event,"A familiar business sent a scheduled update, so it should reach the user now.",0.8711,message_0279;message_0156;message_0155
+msg_083,digest,personal,"A trusted group admin sent a personal message as a voice note, but it is not urgent enough to interrupt.",0.4993,message_0249;message_0170
+msg_063,mute,urgent,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0182
+msg_033,notify,greeting,"A trusted family member sent a routine greeting, so it should reach the user now.",0.9160,message_0122;message_0121
+msg_061,digest,greeting,"A trusted family member sent a routine greeting, but it is not urgent enough to interrupt.",0.8079,message_0194;message_0136
+msg_020,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.8852,message_0199
+msg_017,mute,personal,"An unfamiliar sender sent a personal message, which the user usually ignores, so it is held back.",0.8342,message_0025
+msg_058,digest,forward,"A trusted family member sent a forwarded chain message, but it is not urgent enough to interrupt.",0.8667,message_0194;message_0136;message_0078
+msg_026,mute,promotion,"An unfamiliar sender sent a promotional offer, the user never opted into, so it is held back.",0.8531,message_0032;message_0028;message_0108
+msg_047,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.9527,message_0150;message_0149
+msg_046,mute,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0148;message_0147
+msg_042,notify,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9218,message_0152
+msg_079,mute,personal,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0369
+msg_098,notify,event,"An unfamiliar sender sent a scheduled update, so it should reach the user now.",0.9143,message_0367
+msg_037,notify,personal,"A trusted group admin sent a personal message, so it should reach the user now.",0.6383,none
+msg_007,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.6507,message_0070;message_0008;message_0069
+msg_085,mute,spam,"An unfamiliar sender sent bulk promotional content as a voice note, the user never opted into, so it is held back.",0.5554,message_0221
+msg_001,notify,urgent,"A trusted group admin sent a time-sensitive update, so it should reach the user now.",0.7134,message_0057;message_0015;message_0130
+msg_021,notify,payment,"A trusted group admin sent a payment reminder, time-critical enough to interrupt the user.",0.9271,message_0301
+msg_028,mute,promotion,"A verified business sent a promotional offer, the user never opted into, so it is held back.",0.7470,message_0314;message_0034
+msg_012,digest,forward,"A college contact sent a forwarded chain message, but it is not urgent enough to interrupt.",0.7799,message_0131;message_0132;message_0247
+msg_064,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.8874,message_0365
+msg_103,notify,event,"An unfamiliar sender sent a scheduled update, time-critical enough to interrupt the user.",0.7057,message_0224
+msg_031,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.6502,message_0249;message_0170;message_0169
+msg_057,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.7814,message_0249;message_0170;message_0169
+msg_087,mute,personal,"An unfamiliar sender sent a personal message as a voice note, which the user usually ignores, so it is held back.",0.9700,message_0204;message_0203;message_0223
+msg_067,notify,personal,"A trusted group admin sent a personal message, so it should reach the user now.",0.9700,message_0098
+msg_039,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.9374,message_0255;message_0037;message_0134
+msg_082,digest,personal,"A trusted group admin sent a personal message as a voice note, but it is not urgent enough to interrupt.",0.5300,message_0249
+msg_066,mute,promotion,"A verified business sent a promotional offer, the user never opted into, so it is held back.",0.7775,message_0336;message_0186;message_0185
+msg_049,mute,business_update,"A verified business sent an order update, so it is held back.",0.4766,message_0153;message_0291;message_0154
+msg_015,mute,urgent,"An unfamiliar sender sent a time-sensitive update the user usually opens, so it is held back.",0.6280,message_0095
+msg_051,mute,promotion,"A verified business sent a promotional offer, the user never opted into, so it is held back.",0.7370,message_0257;message_0356;message_0104
+msg_097,digest,urgent,"An unfamiliar sender sent a time-sensitive update, but it is not urgent enough to interrupt.",0.6439,message_0366
+msg_089,digest,event,"An unfamiliar sender sent a scheduled update, but it is not urgent enough to interrupt.",0.4251,message_0382
+msg_053,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.7125,message_0411;message_0253;message_0162
+msg_059,digest,event,"An unfamiliar sender sent a scheduled update, but it is not urgent enough to interrupt.",0.6116,message_0208
+msg_024,mute,promotion,"A verified business sent a promotional offer, the user never opted into, so it is held back.",0.7433,message_0257;message_0356;message_0104
+msg_072,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.9700,message_0095
+msg_036,mute,business_update,"An unfamiliar sender sent an order update carrying forward-chain markers, so it is held back.",0.7191,message_0283;message_0128;message_0127
+msg_076,mute,promotion,"An unfamiliar sender sent a promotional offer, the user never opted into, so it is held back.",0.8676,message_0208;message_0207
+msg_055,digest,urgent,"A trusted family member sent a time-sensitive update, but it is not urgent enough to interrupt.",0.8819,message_0035;message_0148
+msg_102,digest,personal,"An unfamiliar sender sent a personal message, but it is not urgent enough to interrupt.",0.7052,message_0371;message_0230
+msg_080,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.7479,message_0057
+msg_093,digest,event,"A verified business sent a scheduled update, but it is not urgent enough to interrupt.",0.5252,message_0394
+msg_034,notify,greeting,"A trusted family member sent a routine greeting, so it should reach the user now.",0.8317,message_0194;message_0136;message_0078
+msg_035,mute,business_update,"A verified business sent an order update, so it is held back.",0.5199,message_0273;message_0281;message_0302
+msg_101,digest,personal,"An unfamiliar sender sent a personal message, but it is not urgent enough to interrupt.",0.7711,message_0313;message_0374;message_0292
+msg_041,digest,business_update,"A verified business sent an order update, but it is not urgent enough to interrupt.",0.5268,message_0354;message_0329;message_0308
+msg_011,digest,greeting,"A trusted family member sent a routine greeting, but it is not urgent enough to interrupt.",0.8048,message_0194
+msg_110,mute,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9482,message_0238
+msg_095,mute,scam,"The message asks for urgent OTP or account verification through a suspicious flow, so it is muted regardless of the sender.",0.9700,message_0093
+msg_074,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.9700,message_0204;message_0203
+msg_073,mute,forward,"An unfamiliar sender sent a forwarded chain message, which the user usually ignores, so it is held back.",0.9550,message_0214
+msg_054,digest,personal,"An unfamiliar sender sent a personal message, but it is not urgent enough to interrupt.",0.9700,message_0164;message_0163
+msg_068,digest,personal,"A college contact sent a personal message, but it is not urgent enough to interrupt.",0.7036,message_0192;message_0191;message_0010
+msg_100,digest,urgent,"An unfamiliar sender sent a time-sensitive update, but it is not urgent enough to interrupt.",0.6998,message_0362
+msg_062,digest,forward,"A trusted group admin sent a forwarded chain message, but it is not urgent enough to interrupt.",0.7905,message_0271
+msg_096,mute,personal,"An unfamiliar sender sent a personal message, so it is held back.",0.4916,message_0152
+msg_043,digest,forward,"A trusted group admin sent a forwarded chain message, but it is not urgent enough to interrupt.",0.8328,message_0271
+msg_077,digest,personal,"A trusted group admin sent a personal message, but it is not urgent enough to interrupt.",0.7633,message_0255;message_0037;message_0134
+msg_081,digest,personal,"A trusted group admin sent a personal message as a voice note, but it is not urgent enough to interrupt.",0.5140,message_0255;message_0037;message_0134
+msg_025,digest,business_update,"A verified business sent an order update, but it is not urgent enough to interrupt.",0.6290,message_0297;message_0004;message_0239
+msg_084,mute,spam,"A verified business sent bulk promotional content as a voice note, the user never opted into, so it is held back.",0.4827,message_0407;message_0263
+msg_022,notify,payment,"A work contact sent a payment reminder, time-critical enough to interrupt the user.",0.5505,message_0100;message_0099;message_0152

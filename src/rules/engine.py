@@ -103,10 +103,70 @@ SOCIETY_CONTENT_PATTERN = re.compile(
 )
 
 SCAM_HIGH_CONFIDENCE_PATTERN = re.compile(
-    r"\b(kyc (?:suspend|expire|block)|account (?:suspend|block)ed|"
-    r"click this link to verify|verify (?:immediately|now) to avoid|"
-    r"your account (?:will be|has been) (?:blocked|suspended|locked)|"
-    r"congratulations you (?:have )?won|lucky winner|claim your prize)\b",
+    r"\b(kyc (?:suspend|expire|block|verification|update)|"
+    r"account (?:is |has been |will be |may be )?(?:suspend|block|lock)(?:ed|ing)?|"
+    r"click (?:this link |here )?to verify|verify (?:immediately|now|here|your (?:account|kyc|identity))|"
+    r"your account (?:will be|has been|may be) (?:blocked|suspended|locked)|"
+    r"(?:profile|access) will be blocked|"
+    r"confirm (?:your )?(?:password|otp|pin|card|cvv)|"
+    r"congratulations you (?:have )?won|lucky winner|claim your (?:prize|reward)|"
+    r"you have won|lottery|jackpot|prize money|"
+    r"guaranteed (?:\d+%\s*)?(?:monthly )?returns?|investment opportunity|"
+    r"reply with the (?:otp|\d+ ?digit)|share (?:the|your) otp|"
+    r"send (?:me )?the (?:otp|code)|read out the code|"
+    r"(?:wallet|payment|account) verification failed|"
+    r"to keep (?:your )?account active|"
+    r"buy gift cards?|gift card codes?)\b",
+    re.IGNORECASE,
+)
+
+#: Attempts to rewrite the router's own instructions. A message that tries to
+#: control the system deciding its fate is hostile by construction, regardless
+#: of what the rest of it says, so it is force-muted before any other rule can
+#: act on the content it is trying to smuggle through.
+PROMPT_INJECTION_PATTERN = re.compile(
+    r"(ignore (?:all )?(?:the )?(?:previous|prior|above|earlier) "
+    r"(?:routing )?(?:rules?|instructions?|prompts?)|"
+    r"disregard (?:all )?(?:the )?(?:previous|prior|above|system)|"
+    r"mark this (?:message )?as (?:notify|urgent|important|high)|"
+    r"(?:set|force) (?:the )?action\s*[:=]\s*(?:notify|digest|mute)|"
+    r"you are (?:now )?(?:a |an )?(?:dan|different|unrestricted)|"
+    r"pretend (?:you are|to be)|act as if you|"
+    r"system\s*:\s*|</?(?:system|message|instruction)>|"
+    r"(?:^|\n|\\n|`)\s*(?:assistant|user|system)\s*[:=]|"
+    r"action\s*[:=]\s*(?:notify|digest|mute)|"
+    r"no (?:restrictions|safety|guardrails)|"
+    r"actual message\s*:)",
+    re.IGNORECASE,
+)
+
+#: URL shorteners and link forms that hide their true destination. Flagged
+#: only in combination with credential or verification language, since a bare
+#: shortened link in a friendly chat is not itself an attack.
+SUSPICIOUS_LINK_PATTERN = re.compile(
+    r"\b(?:bit\.ly|tinyurl|t\.co|goo\.gl|is\.gd|rebrand\.ly|cutt\.ly|"
+    r"[a-z0-9-]*(?:secure|verify|login|account|update|support)[a-z0-9-]*\."
+    r"(?:com|net|in|info|xyz|top|link))",
+    re.IGNORECASE,
+)
+
+#: Language that turns a hidden link into a credential-harvesting attempt.
+CREDENTIAL_LURE_PATTERN = re.compile(
+    r"\b(verify|confirm|login|log in|sign in|update|reactivate|unlock|"
+    r"click|tap|secure your|blocked|suspended|expire)\b",
+    re.IGNORECASE,
+)
+
+#: Classic social-engineering pressure: urgency plus secrecy plus an unusual
+#: request. Individually weak, jointly a strong signal.
+SOCIAL_ENGINEERING_PATTERN = re.compile(
+    r"\b(do not tell (?:anyone|anybody)|don'?t tell (?:anyone|anybody)|"
+    r"keep this (?:between us|confidential|secret)|"
+    r"this is (?:the )?(?:bank|fraud|security|support) team|"
+    r"i am your (?:manager|boss|ceo)|this is your (?:manager|boss|ceo)|"
+    r"urgently (?:buy|purchase|transfer|send)|"
+    r"need you to (?:buy|purchase|transfer)|"
+    r"to secure your account)\b",
     re.IGNORECASE,
 )
 
@@ -1690,6 +1750,90 @@ class RuleEngine:
         an OTP-shaped message that is *also* a KYC-suspension scam should not
         be forced to notify.
         """
+        injection = PROMPT_INJECTION_PATTERN.search(message.content)
+        if injection:
+            triggered.append(
+                TriggeredRule(
+                    rule_id="scam_prompt_injection",
+                    family=RuleFamily.SCAM,
+                    description=(
+                        "Message attempts to override the router's own instructions "
+                        f"('{injection.group(0).strip().lower()[:40]}')."
+                    ),
+                    weight=_W.SCAM,
+                    confidence=0.90,
+                    evidence_message_ids=(message.message_id,),
+                    signals=("content:prompt_injection",),
+                )
+            )
+            overrides.append(
+                OverrideRecord(
+                    rule_id="scam_prompt_injection",
+                    effect=OverrideEffect.FORCE,
+                    bound=Action.MUTE,
+                    binding=True,
+                    confidence=0.90,
+                    note="Instruction-override attempt; forced mute.",
+                )
+            )
+            return
+
+        social = SOCIAL_ENGINEERING_PATTERN.search(message.content)
+        if social:
+            triggered.append(
+                TriggeredRule(
+                    rule_id="scam_social_engineering",
+                    family=RuleFamily.SCAM,
+                    description=(
+                        "Message uses social-engineering pressure "
+                        f"('{social.group(0).lower()}')."
+                    ),
+                    weight=_W.SCAM,
+                    confidence=0.80,
+                    evidence_message_ids=(message.message_id,),
+                    signals=(f"content:social_engineering={social.group(0).lower()}",),
+                )
+            )
+            overrides.append(
+                OverrideRecord(
+                    rule_id="scam_social_engineering",
+                    effect=OverrideEffect.FORCE,
+                    bound=Action.MUTE,
+                    binding=True,
+                    confidence=0.80,
+                    note="Social-engineering pattern; forced mute.",
+                )
+            )
+            return
+
+        link = SUSPICIOUS_LINK_PATTERN.search(message.content)
+        if link and CREDENTIAL_LURE_PATTERN.search(message.content):
+            triggered.append(
+                TriggeredRule(
+                    rule_id="scam_suspicious_link",
+                    family=RuleFamily.SCAM,
+                    description=(
+                        "Message pairs a hidden or look-alike link "
+                        f"('{link.group(0).lower()}') with credential-verification language."
+                    ),
+                    weight=_W.SCAM,
+                    confidence=0.80,
+                    evidence_message_ids=(message.message_id,),
+                    signals=(f"content:suspicious_link={link.group(0).lower()}",),
+                )
+            )
+            overrides.append(
+                OverrideRecord(
+                    rule_id="scam_suspicious_link",
+                    effect=OverrideEffect.FORCE,
+                    bound=Action.MUTE,
+                    binding=True,
+                    confidence=0.80,
+                    note="Obscured link plus credential lure; forced mute.",
+                )
+            )
+            return
+
         match = SCAM_HIGH_CONFIDENCE_PATTERN.search(message.content)
         if not match and verdict.spam_score < 0.75:
             return

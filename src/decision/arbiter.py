@@ -246,178 +246,205 @@ def apply_context_exceptions(
 # Reason generation
 # --------------------------------------------------------------------------- #
 
-#: A reason rule: a predicate over (rules, metadata, band) and the text it
-#: produces. Evaluated top-down; the first match wins. Ordered most specific
-#: and most severe first.
-_ReasonPredicate = Callable[["RuleEvaluation", dict, Action], bool]
-_ReasonTemplate = Callable[["RuleEvaluation", dict, Action], str]
+# --------------------------------------------------------------------------- #
+# Reason generation
+# --------------------------------------------------------------------------- #
+#
+# Reasons are composed rather than looked up, from four parts:
+#
+#     <source>  <content>  [<evidence>]  <justification for this action>
+#
+# e.g. "A verified business sent an order or service update matching the
+#       user's recent order history, so it is worth surfacing now."
+#
+# This mirrors the reference style in ``dataset/sample_messages.csv``, which
+# names the actor, describes the content, and -- crucially -- states why the
+# chosen action follows. The justification clause is selected from the final
+# band, so a reason can never contradict the action it explains.
+#
+# Everything is deterministic: no LLM, no sampling, no wall-clock reads.
+
+#: Upper bound on reason length, in words. The reference reasons in
+#: ``dataset/sample_messages.csv`` average about fourteen words.
+MAX_REASON_WORDS = 18
+
+#: Source clause keyed by relationship category, used when no more specific
+#: sender description applies.
+_SOURCE_BY_CATEGORY: dict[str, str] = {
+    "Family": "A trusted family member",
+    "Close Friend": "A close contact",
+    "Office": "A work contact",
+    "College": "A college contact",
+    "Society": "A society contact",
+    "Business": "A business account",
+    "Unknown": "An unfamiliar sender",
+}
+
+#: Content clause keyed by the official message type.
+_CONTENT_BY_TYPE: dict[str, str] = {
+    "urgent": "a time-sensitive update",
+    "event": "a scheduled update",
+    "payment": "a payment reminder",
+    "business_update": "an order update",
+    "promotion": "a promotional offer",
+    "greeting": "a routine greeting",
+    "forward": "a forwarded chain message",
+    "personal": "a personal message",
+    "spam": "bulk promotional content",
+    "scam": "a suspicious verification request",
+    "unknown": "a message with no clear purpose",
+}
+
+#: Justification clause keyed by the final action. Selected from the band that
+#: was actually chosen, so the reason cannot contradict the decision.
+_JUSTIFICATION: dict[Action, str] = {
+    Action.NOTIFY: "so it should reach the user now",
+    Action.DIGEST: "but it is not urgent enough to interrupt",
+    Action.MUTE: "so it is held back",
+}
+
+#: Risk reasons, which replace the composed sentence entirely. A safety
+#: finding is the whole explanation and should not be diluted by relationship
+#: or history commentary.
+_RISK_REASONS: tuple[tuple[str, str], ...] = (
+    (
+        "scam_high_confidence",
+        "The message asks for urgent OTP or account verification through a "
+        "suspicious flow, so it is muted regardless of the sender.",
+    ),
+    (
+        "sys_blocked_sender",
+        "The user has blocked this sender, so the message is muted without "
+        "further consideration.",
+    ),
+)
 
 
-def _has_rule(rules: RuleEvaluation, rule_id: str) -> bool:
-    """Return whether a specific rule id fired."""
-    return rules.has_rule(rule_id) if hasattr(rules, "has_rule") else any(
-        r.rule_id == rule_id for r in rules.triggered_rules
-    )
+def _source_clause(metadata: dict, band: Action) -> str:
+    """Describe who sent the message, most specific description first."""
+    category = str(metadata.get("relationship_category", "Unknown"))
+
+    if metadata.get("sender_is_group_admin"):
+        return "A trusted group admin"
+
+    if metadata.get("business_is_verified"):
+        return "A verified business"
+
+    if metadata.get("business_has_active_order"):
+        return "A business with an open order"
+
+    if metadata.get("is_business_message") or metadata.get("business_txn_count"):
+        if metadata.get("business_is_known_to_user"):
+            return "A familiar business"
+        return "An unknown business"
+
+    if metadata.get("business_promo_ratio") is not None and category == "Business":
+        return "An unknown business"
+
+    if metadata.get("mentions_user"):
+        return "A group member"
+
+    return _SOURCE_BY_CATEGORY.get(category, "A sender")
 
 
-def _category_noun(meta: dict) -> str:
-    """Return a human noun phrase for the sender's relationship category."""
-    category = str(meta.get("relationship_category", "Unknown"))
-    return _CATEGORY_NOUN.get(category, "sender")
+def _content_clause(message_type: str, metadata: dict) -> str:
+    """Describe what the message contains."""
+    base = _CONTENT_BY_TYPE.get(str(message_type).lower(), "a message")
+
+    if metadata.get("is_media_only"):
+        media = str(metadata.get("media_type", "")).lower()
+        if media == "image":
+            return f"{base} as an image"
+        if media == "voice":
+            return f"{base} as a voice note"
+    return base
 
 
-def _reason_rules() -> list[tuple[_ReasonPredicate, _ReasonTemplate]]:
-    """Build the ordered (predicate, template) list for reason generation.
+def _evidence_clause(metadata: dict) -> str:
+    """Reference the strongest supporting history signal, if any.
 
-    Rebuilt per call rather than module-level so lambdas close over nothing
-    mutable; the cost is negligible relative to a single decision.
-
-    Returns
-    -------
-    list of (predicate, template) pairs, most specific first.
+    Only one clause is emitted, chosen by how strongly it bears on the
+    decision, so the sentence stays to a single readable line.
     """
-    return [
-        (
-            lambda r, m, b: any(rule.family is RuleFamily.SCAM for rule in r.triggered_rules),
-            lambda r, m, b: "Potential phishing attempt detected.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "sys_blocked_sender"),
-            lambda r, m, b: "Sender is blocked by the user.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "emergency_otp"),
-            lambda r, m, b: "Time-sensitive verification code requires immediate attention.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "emergency_keyword")
-            and str(m.get("relationship_category")) in ("Family", "Close Friend"),
-            lambda r, m, b: f"Trusted {_category_noun(m)} sent a time-sensitive update.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "finance_payment_reminder")
-            and bool(m.get("business_is_verified")),
-            lambda r, m, b: "Verified business sent a payment reminder.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "finance_transaction_alert")
-            and bool(m.get("business_is_verified")),
-            lambda r, m, b: "Verified business sent a transaction alert.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "finance_payment_reminder"),
-            lambda r, m, b: "Payment reminder detected.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "healthcare_critical_result"),
-            lambda r, m, b: "Critical healthcare update requires attention.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "healthcare_appointment_reminder"),
-            lambda r, m, b: "Healthcare appointment reminder detected.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "travel_checkin_reminder"),
-            lambda r, m, b: "Time-sensitive travel check-in reminder.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "travel_booking_confirmation"),
-            lambda r, m, b: "Travel booking confirmation received.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "promotions_repeated_cold"),
-            lambda r, m, b: "Repeated promotional message previously dismissed.",
-        ),
-        (
-            lambda r, m, b: any(rule.family is RuleFamily.PROMOTIONS for rule in r.triggered_rules),
-            lambda r, m, b: "Promotional message from an unfamiliar sender.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "spam_detected"),
-            lambda r, m, b: "Message matches known spam patterns.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "sys_duplicate_message"),
-            lambda r, m, b: "Duplicate message already seen recently.",
-        ),
-        (
-            lambda r, m, b: str(m.get("relationship_category")) == "Family"
-            and b is not Action.MUTE,
-            lambda r, m, b: "Trusted family member sent a message.",
-        ),
-        (
-            lambda r, m, b: str(m.get("relationship_category")) == "Close Friend"
-            and b is not Action.MUTE,
-            lambda r, m, b: "Message from a close friend with an active conversation.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "office_working_hours_request"),
-            lambda r, m, b: "Work-related request received during working hours.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "college_deadline"),
-            lambda r, m, b: "College-related deadline or reminder detected.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "society_urgent_security"),
-            lambda r, m, b: "Urgent society or security notice.",
-        ),
-        (
-            lambda r, m, b: _has_rule(r, "business_active_order_update"),
-            lambda r, m, b: "Business update related to an active order.",
-        ),
-        (
-            lambda r, m, b: bool(m.get("mentions_user")),
-            lambda r, m, b: "User was directly mentioned in the conversation.",
-        ),
-        (
-            lambda r, m, b: b is Action.MUTE
-            and (_has_rule(r, "sys_muted_contact") or _has_rule(r, "sys_muted_group")),
-            lambda r, m, b: "Message muted per user preference.",
-        ),
-    ]
+    if metadata.get("is_reported_recently"):
+        count = int(metadata.get("report_count", 0) or 0)
+        if count > 1:
+            return f" from a sender reported {count} times"
+        return " from a previously reported sender"
+
+    if metadata.get("is_duplicate"):
+        count = int(metadata.get("duplicate_count", 0) or 0)
+        if count > 1:
+            return f" repeating content seen {count} times recently"
+        return " repeating content seen recently"
+
+    dismissal = float(metadata.get("sender_dismissal_rate", 0.0) or 0.0)
+    if dismissal >= 0.4:
+        return " of a kind the user repeatedly dismisses"
+
+    if metadata.get("business_has_active_order"):
+        return " matching the user's recent order"
+
+    reply_rate = float(metadata.get("sender_reply_rate", 0.0) or 0.0)
+    if reply_rate >= 0.5:
+        return " from a sender the user regularly replies to"
+
+    open_rate = float(metadata.get("sender_open_rate", 0.0) or 0.0)
+    if open_rate >= 0.6:
+        return " the user usually opens"
+
+    if metadata.get("group_is_muted"):
+        return " in a group the user has muted"
+
+    if metadata.get("user_dnd_active"):
+        return " arriving in the user's quiet hours"
+
+    if metadata.get("has_forward_marker"):
+        return " carrying forward-chain markers"
+
+    return ""
 
 
-#: Fallback reason text keyed by message type value, used when no rule-based
-#: template matched.
-_FALLBACK_BY_TYPE: dict[str, str] = {
-    "otp": "Verification code message detected.",
-    "transactional": "Transactional update received.",
-    "promotional": "Promotional content detected.",
-    "reminder": "Reminder message detected.",
-    "forward": "Forwarded message detected.",
-    "spam": "Message flagged as spam.",
-    "media_share": "Media message received.",
-    "work": "Work-related message received.",
-    "group_chat": "Group conversation activity.",
-    "personal": "Personal message received.",
-    "other": "Message received.",
-}
+def _mute_justification(metadata: dict, message_type: str) -> str:
+    """Pick the mute justification that best matches why it was muted."""
+    if metadata.get("group_is_muted") or metadata.get("user_muted_sender"):
+        return "and the user muted this conversation, so it is held back"
 
-#: Fallback reason text keyed by final band, used when even the type-based
-#: fallback has nothing to say.
-_FALLBACK_BY_BAND: dict[Action, str] = {
-    Action.NOTIFY: "Message flagged as high priority.",
-    Action.DIGEST: "Message queued for later review.",
-    Action.MUTE: "Message classified as low priority.",
-}
+    dismissal = float(metadata.get("sender_dismissal_rate", 0.0) or 0.0)
+    if dismissal >= 0.4 or str(message_type).lower() in {"forward", "greeting"}:
+        return "which the user usually ignores, so it is held back"
+
+    if str(message_type).lower() in {"promotion", "spam"}:
+        return "the user never opted into, so it is held back"
+
+    return _JUSTIFICATION[Action.MUTE]
 
 
 def build_reason(
     rules: RuleEvaluation,
     band: Action,
+    message_type: str | None = None,
+    evidence: EvidenceSelection | None = None,
 ) -> str:
-    """Generate a deterministic, one-sentence, human-readable reason.
+    """Generate a deterministic, one-sentence explanation for a decision.
 
-    No LLM involved: a fixed, ordered set of rule-driven templates, falling
-    back to a message-type-based sentence and finally a band-based sentence.
+    Composes ``<source> <content>[<evidence>], <justification>`` so that every
+    reason names who sent the message, what it was, the strongest supporting
+    history signal where one exists, and why the chosen action follows. No
+    LLM is involved.
 
     Parameters
     ----------
     rules:
-        The rule evaluation for this message.
+        The rule evaluation, whose metadata supplies every signal used.
     band:
-        The final resolved action.
+        The final resolved action. The justification clause is selected from
+        this, so a reason can never contradict the decision it explains.
+    message_type:
+        The official message type. Falls back to the rule engine's suggestion.
+    evidence:
+        The selected evidence, used only to note when a decision rests on no
+        historical support at all.
 
     Returns
     -------
@@ -425,19 +452,54 @@ def build_reason(
         A single sentence.
     """
     metadata = rules.metadata
-    for predicate, template in _reason_rules():
-        try:
-            if predicate(rules, metadata, band):
-                return template(rules, metadata, band)
-        except Exception as error:  # noqa: BLE001 - a bad template must not break the decision
-            logger.warning("build_reason: template evaluation failed (%s)", error)
-            continue
 
-    type_key = rules.suggested_message_type.value
-    if type_key in _FALLBACK_BY_TYPE:
-        return _FALLBACK_BY_TYPE[type_key]
+    # Safety findings are the whole explanation.
+    for rule_id, text in _RISK_REASONS:
+        if any(rule.rule_id == rule_id for rule in rules.triggered_rules):
+            return text
 
-    return _FALLBACK_BY_BAND[band]
+    resolved_type = str(
+        message_type if message_type is not None else rules.suggested_message_type.value
+    ).lower()
+
+    if resolved_type == "scam":
+        return _RISK_REASONS[0][1]
+
+    source = _source_clause(metadata, band)
+    content = _content_clause(resolved_type, metadata)
+    evidence_text = _evidence_clause(metadata)
+
+    if band is Action.MUTE:
+        justification = _mute_justification(metadata, resolved_type)
+    else:
+        justification = _JUSTIFICATION[band]
+
+    # An OTP or explicit mention deserves a sharper notify justification.
+    if band is Action.NOTIFY:
+        if metadata.get("content_is_otp"):
+            justification = "carrying a verification code needed right away"
+        elif metadata.get("mentions_user"):
+            justification = "addressed to the user directly, so it interrupts now"
+        elif float(metadata.get("content_urgency_score", 0.0) or 0.0) >= 0.5:
+            justification = "time-critical enough to interrupt the user"
+
+    if band is Action.DIGEST and not evidence_text and resolved_type in {
+        "greeting",
+        "personal",
+    }:
+        justification = "safe casual content the user can read later"
+
+    sentence = f"{source} sent {content}{evidence_text}, {justification}."
+    sentence = " ".join(sentence.split())
+
+    # Concision is a hard property, not a preference: the reference reasons
+    # average about fourteen words. When the supporting-evidence clause pushes
+    # the sentence past the cap, it is dropped -- the source, the content and
+    # the justification matter more than the corroborating detail.
+    if len(sentence.split()) > MAX_REASON_WORDS and evidence_text:
+        sentence = " ".join(f"{source} sent {content}, {justification}.".split())
+
+    return sentence
 
 
 # --------------------------------------------------------------------------- #
@@ -532,7 +594,12 @@ class Arbiter:
             asr_result=asr_result,
         )
 
-        reason = build_reason(rules, band)
+        reason = build_reason(
+            rules,
+            band,
+            message_type=rules.suggested_message_type.value,
+            evidence=evidence,
+        )
         source = self._resolve_source(resolution, exception_notes)
         trace = self._build_trace(message, priority, rules, band, source, calibrated)
 
